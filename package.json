@@ -1,0 +1,21 @@
+{
+  "name": "hua-cli",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "hua": "packages/cli/dist/index.js"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc -b packages/plugin-sdk packages/core packages/plugin-sql packages/cli",
+    "clean": "powershell -NoProfile -Command \"Get-ChildItem -Path packages -Directory | ForEach-Object { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $_.FullName 'dist') }\"",
+    "hua": "node packages/cli/dist/index.js",
+    "prepare": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.17",
+    "typescript": "^5.8.3"
+  }
+}

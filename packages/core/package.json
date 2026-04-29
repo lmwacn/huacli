@@ -1,0 +1,16 @@
+{
+  "name": "@hua/core",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@hua/plugin-sdk": "0.1.0",
+    "commander": "^12.1.0"
+  }
+}

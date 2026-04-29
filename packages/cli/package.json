@@ -1,0 +1,19 @@
+{
+  "name": "@hua/cli",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "hua": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@hua/core": "0.1.0",
+    "@hua/plugin-sql": "0.1.0"
+  }
+}
