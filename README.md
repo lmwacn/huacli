@@ -69,7 +69,7 @@ npm link
 ```bash
 hua --help
 hua sql --help
-hua sql profile-list
+hua sql profile list
 hua sql query "select 1" --profile dev
 ```
 
@@ -90,14 +90,18 @@ npm unlink
 ```bash
 hua --help
 hua sql --help
-hua sql profile-list
+hua sql profile add dev --host 127.0.0.1 --port 3306 --user root --database test
+hua sql profile list
+hua sql profile use dev
+hua sql profile show
+hua sql profile remove dev
 hua sql query "select 1" --profile dev
 ```
 
 说明：
 
-- `sql profile-list` 当前返回占位信息
-- `sql query` 当前只打印参数，尚未连接真实 MySQL
+- `sql profile *` 已支持本地配置管理，配置文件位于 `~/.hua/config.json`
+- `sql query` 当前会读取 profile 并显示目标连接，尚未连接真实 MySQL
 
 ## 插件开发
 
@@ -132,7 +136,7 @@ export const helloPlugin = definePlugin({
 
 ## 下一步计划
 
-- 增加配置文件读写
-- 增加 `sql profile add/list/use`
 - 接入 `mysql2`
-- 支持真实 SQL 查询结果输出
+- 支持真实 SQL 查询结果输出（table/json/csv）
+- 增加 `sql exec <file.sql>` 执行脚本能力
+- 为 `sql profile` 增加项目级配置与环境变量覆盖策略

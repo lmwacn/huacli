@@ -15,7 +15,8 @@ function buildContext(command: Command): CommandContext {
 }
 
 function registerCommand(parent: Command, commandDefinition: HuaCommand): void {
-  const command = parent.command(commandDefinition.name).description(commandDefinition.description);
+  const commandParent = ensureCommandPath(parent, commandDefinition.parentPath ?? []);
+  const command = commandParent.command(commandDefinition.name).description(commandDefinition.description);
 
   for (const alias of commandDefinition.aliases ?? []) {
     command.alias(alias);
@@ -31,13 +32,30 @@ function registerCommand(parent: Command, commandDefinition: HuaCommand): void {
 
   command.action(async (...actionArgs: unknown[]) => {
     const currentCommand = actionArgs[actionArgs.length - 1] as Command;
-    const parsedArgs = actionArgs.slice(0, -1).map((value) => String(value));
     const context = buildContext(currentCommand);
-    await commandDefinition.action({
-      ...context,
-      args: parsedArgs,
-    });
+    await commandDefinition.action(context);
   });
+}
+
+function ensureCommandPath(parent: Command, segments: string[]): Command {
+  let currentParent = parent;
+
+  for (const segment of segments) {
+    const normalizedSegment = segment.trim();
+    if (!normalizedSegment) {
+      continue;
+    }
+
+    const existing = currentParent.commands.find((subCommand) => subCommand.name() === normalizedSegment);
+    if (existing) {
+      currentParent = existing;
+      continue;
+    }
+
+    currentParent = currentParent.command(normalizedSegment);
+  }
+
+  return currentParent;
 }
 
 export class HuaCliApp {

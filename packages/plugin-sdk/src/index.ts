@@ -8,6 +8,7 @@ export interface CommandContext {
 export interface HuaCommand {
   name: string;
   description: string;
+  parentPath?: string[];
   aliases?: string[];
   arguments?: string[];
   options?: CommandOption[];

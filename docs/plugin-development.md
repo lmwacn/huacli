@@ -25,6 +25,7 @@ export interface CommandContext {
 export interface HuaCommand {
   name: string;
   description: string;
+  parentPath?: string[];
   aliases?: string[];
   arguments?: string[];
   options?: CommandOption[];
@@ -47,6 +48,14 @@ export const demoPlugin = definePlugin({
   name: "demo",
   description: "demo plugin",
   commands: [
+    {
+      parentPath: ["profile"],
+      name: "list",
+      description: "list profiles",
+      async action(context) {
+        context.log("profile list");
+      },
+    },
     {
       name: "echo <message>",
       description: "print message",
@@ -98,7 +107,7 @@ plugin-xxx/
 ### 4. 命令命名
 
 - 一级命令名由插件名提供，例如 `sql`
-- 插件内部命令使用短横线风格，例如 `profile-list`
+- 建议优先使用嵌套命令，例如 `parentPath: ["profile"] + name: "add"`，最终命令为 `sql profile add`
 - 别名仅作为兼容或快捷方式使用
 
 ### 5. 错误处理
