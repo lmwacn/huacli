@@ -1,3 +1,4 @@
+import mysql from "mysql2/promise";
 import { definePlugin } from "@hua/plugin-sdk";
 import {
   addOrUpdateProfile,
@@ -34,6 +35,34 @@ function formatProfile(name: string, profile: SqlProfile, isDefault: boolean): s
   return `${name}${defaultTag} -> ${profile.user}@${profile.host}:${profile.port}/${profile.database}`;
 }
 
+function formatResults(columns: mysql.FieldPacket[], rows: unknown[]): string {
+  if (rows.length === 0) {
+    return "(empty result set)";
+  }
+
+  const colWidths = columns.map((col) => col.name.length);
+  const data = rows as Record<string, unknown>[];
+
+  for (const row of data) {
+    columns.forEach((col, i) => {
+      const val = String(row[col.name] ?? "NULL");
+      colWidths[i] = Math.max(colWidths[i], val.length);
+    });
+  }
+
+  const header = columns.map((col, i) => col.name.padEnd(colWidths[i])).join(" | ");
+  const separator = colWidths.map((w) => "-".repeat(w)).join("-+-");
+
+  const lines: string[] = [header, separator];
+  for (const row of data) {
+    const rowStr = columns.map((col, i) => String(row[col.name] ?? "NULL").padEnd(colWidths[i])).join(" | ");
+    lines.push(rowStr);
+  }
+
+  lines.push(`\n${rows.length} row(s) returned`);
+  return lines.join("\n");
+}
+
 export const sqlPlugin = definePlugin({
   name: "sql",
   description: "SQL tools and database commands",
@@ -59,12 +88,38 @@ export const sqlPlugin = definePlugin({
           );
         }
 
-        context.log(`[sql] profile=${resolved.name}`);
-        context.log(`[sql] query=${statement}`);
-        context.log(
-          `[sql] target=${resolved.profile.user}@${resolved.profile.host}:${resolved.profile.port}/${resolved.profile.database}`,
-        );
-        context.log("SQL execution is not connected yet. Next step is wiring mysql2 and profile config.");
+        const { profile } = resolved;
+
+        let connection: mysql.Connection | null = null;
+        try {
+          connection = await mysql.createConnection({
+            host: profile.host,
+            port: profile.port,
+            user: profile.user,
+            password: profile.password,
+            database: profile.database,
+          });
+
+          const [rows, fields] = await connection.query(statement);
+
+          if (!fields || fields.length === 0) {
+            const affectedRows = (rows as mysql.ResultSetHeader).affectedRows;
+            if (affectedRows !== undefined) {
+              context.log(`Query OK, ${affectedRows} row(s) affected`);
+            } else {
+              context.log("Query executed successfully");
+            }
+          } else {
+            context.log(formatResults(fields as mysql.FieldPacket[], rows as unknown[]));
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          throw new Error(`Query failed (target: ${profile.user}@${profile.host}:${profile.port}/${profile.database}): ${message}`);
+        } finally {
+          if (connection) {
+            await connection.end();
+          }
+        }
       },
     },
     {
