@@ -64,8 +64,22 @@ function loadFullConfig(): HuaCliConfig {
 function saveFullConfig(config: Record<string, unknown>): void {
   const configPath = getConfigFilePath();
   const configDir = path.dirname(configPath);
+
+  let existing: Record<string, unknown> = {};
+  if (fs.existsSync(configPath)) {
+    const raw = fs.readFileSync(configPath, "utf8").trim();
+    if (raw) {
+      try {
+        existing = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        existing = {};
+      }
+    }
+  }
+
+  existing.http = config.http;
   fs.mkdirSync(configDir, { recursive: true });
-  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  fs.writeFileSync(configPath, `${JSON.stringify(existing, null, 2)}\n`, "utf8");
 }
 
 export function listProfiles(): Array<{ name: string; isDefault: boolean; profile: HttpProfile }> {
