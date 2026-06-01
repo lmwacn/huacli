@@ -115,6 +115,8 @@ hua http post /api/users --data '{"name":"test"}' -H "Content-Type: application/
 hua ssh profile add prod --host 1.2.3.4 --username root --password xxx
 hua ssh profile list
 hua ssh exec -p prod "uname -a && df -h"
+hua ssh upload ./file.txt /remote/path/file.txt
+hua ssh download /remote/path/file.txt ./local-file.txt
 ```
 
 所有配置统一存储在 `~/.hua/config.json`。
