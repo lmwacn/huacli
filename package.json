@@ -9,7 +9,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -b packages/plugin-sdk packages/core packages/plugin-sql packages/cli",
+    "build": "tsc -b packages/plugin-sdk packages/core packages/plugin-sql packages/plugin-http packages/plugin-ssh packages/cli",
     "clean": "powershell -NoProfile -Command \"Get-ChildItem -Path packages -Directory | ForEach-Object { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $_.FullName 'dist') }\"",
     "hua": "node packages/cli/dist/index.js",
     "prepare": "npm run build"

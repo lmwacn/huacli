@@ -1,0 +1,20 @@
+{
+  "name": "@hua/plugin-ssh",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@hua/plugin-sdk": "0.1.0",
+    "ssh2": "^1.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.17",
+    "@types/ssh2": "^1.15.1"
+  }
+}

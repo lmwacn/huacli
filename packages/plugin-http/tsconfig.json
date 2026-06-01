@@ -6,10 +6,7 @@
     "composite": true
   },
   "references": [
-    { "path": "../core" },
-    { "path": "../plugin-sql" },
-    { "path": "../plugin-http" },
-    { "path": "../plugin-ssh" }
+    { "path": "../plugin-sdk" }
   ],
   "include": [
     "src/**/*.ts"

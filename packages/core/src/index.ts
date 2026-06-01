@@ -27,7 +27,11 @@ function registerCommand(parent: Command, commandDefinition: HuaCommand): void {
   }
 
   for (const option of commandDefinition.options ?? []) {
-    command.option(option.flags, option.description, option.defaultValue as never);
+    if (option.processor) {
+      command.option(option.flags, option.description, option.processor, [] as never);
+    } else {
+      command.option(option.flags, option.description, option.defaultValue as never);
+    }
   }
 
   command.action(async (...actionArgs: unknown[]) => {

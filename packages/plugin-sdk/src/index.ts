@@ -19,6 +19,8 @@ export interface CommandOption {
   flags: string;
   description: string;
   defaultValue?: string | boolean | number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  processor?: (value: string, previous: any) => any;
 }
 
 export interface HuaPlugin {
