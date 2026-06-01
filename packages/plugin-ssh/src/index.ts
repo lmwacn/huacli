@@ -1,5 +1,5 @@
 import { definePlugin } from "@hua/plugin-sdk";
-import { execCommand } from "./client";
+import { execCommand, uploadFile, downloadFile } from "./client";
 import {
   addOrUpdateProfile,
   getConfigPath,
@@ -83,6 +83,92 @@ export const sshPlugin = definePlugin({
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           throw new Error(`SSH exec failed (target: ${profile.username}@${profile.host}:${profile.port}): ${message}`);
+        }
+      },
+    },
+    {
+      name: "upload",
+      description: "Upload a local file to remote server via SFTP",
+      arguments: ["<localPath>", "<remotePath>"],
+      options: [
+        {
+          flags: "-p, --profile <name>",
+          description: "Connection profile name",
+        },
+      ],
+      async action(context) {
+        const localPath = (context.args[0] ?? "").trim();
+        let remotePath = (context.args[1] ?? "").trim();
+
+        // Git Bash auto-converts /root/... to Windows path, undo it
+        if (remotePath.startsWith("C:/Program Files/Git")) {
+          remotePath = remotePath.slice("C:/Program Files/Git".length);
+        }
+
+        if (!localPath || !remotePath) {
+          throw new Error("Usage: hua ssh upload <localPath> <remotePath>");
+        }
+
+        const explicitProfile = readStringOption(context.options, "profile");
+        const resolved = resolveProfile(explicitProfile);
+
+        if (!resolved) {
+          throw new Error(
+            "No available SSH profile. Use `hua ssh profile add <name> --host ... --username ...` first.",
+          );
+        }
+
+        const { profile } = resolved;
+
+        try {
+          await uploadFile(profile, localPath, remotePath);
+          context.log(`Uploaded: ${localPath} -> ${profile.host}:${remotePath}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          throw new Error(`Upload failed (target: ${profile.username}@${profile.host}:${profile.port}): ${message}`);
+        }
+      },
+    },
+    {
+      name: "download",
+      description: "Download a file from remote server via SFTP",
+      arguments: ["<remotePath>", "<localPath>"],
+      options: [
+        {
+          flags: "-p, --profile <name>",
+          description: "Connection profile name",
+        },
+      ],
+      async action(context) {
+        let remotePath = (context.args[0] ?? "").trim();
+        const localPath = (context.args[1] ?? "").trim();
+
+        // Git Bash auto-converts /root/... to Windows path, undo it
+        if (remotePath.startsWith("C:/Program Files/Git")) {
+          remotePath = remotePath.slice("C:/Program Files/Git".length);
+        }
+
+        if (!remotePath || !localPath) {
+          throw new Error("Usage: hua ssh download <remotePath> <localPath>");
+        }
+
+        const explicitProfile = readStringOption(context.options, "profile");
+        const resolved = resolveProfile(explicitProfile);
+
+        if (!resolved) {
+          throw new Error(
+            "No available SSH profile. Use `hua ssh profile add <name> --host ... --username ...` first.",
+          );
+        }
+
+        const { profile } = resolved;
+
+        try {
+          await downloadFile(profile, remotePath, localPath);
+          context.log(`Downloaded: ${profile.host}:${remotePath} -> ${localPath}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          throw new Error(`Download failed (target: ${profile.username}@${profile.host}:${profile.port}): ${message}`);
         }
       },
     },
