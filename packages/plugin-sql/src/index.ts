@@ -1,4 +1,5 @@
 import mysql from "mysql2/promise";
+import readline from "node:readline";
 import { definePlugin } from "@hua/plugin-sdk";
 import {
   addOrUpdateProfile,
@@ -98,6 +99,7 @@ export const sqlPlugin = definePlugin({
             user: profile.user,
             password: profile.password,
             database: profile.database,
+            connectTimeout: 5000,
           });
 
           const [rows, fields] = await connection.query(statement);
@@ -120,6 +122,170 @@ export const sqlPlugin = definePlugin({
             await connection.end();
           }
         }
+      },
+    },
+    {
+      name: "shell",
+      description: "Interactive SQL shell with connection reuse (30s idle timeout)",
+      options: [
+        {
+          flags: "-p, --profile <name>",
+          description: "Connection profile name",
+        },
+        {
+          flags: "-t, --timeout <seconds>",
+          description: "Idle timeout in seconds (default: 30)",
+          defaultValue: 30,
+        },
+      ],
+      async action(context) {
+        const explicitProfile = readStringOption(context.options, "profile");
+        const resolved = resolveProfile(explicitProfile);
+
+        if (!resolved) {
+          throw new Error(
+            "No available SQL profile. Use `hua sql profile add <name> --host ... --user ... --database ...` first.",
+          );
+        }
+
+        const { profile } = resolved;
+        const timeoutSec = Number.parseInt(readStringOption(context.options, "timeout") || "30", 10);
+        const timeoutMs = (Number.isFinite(timeoutSec) && timeoutSec > 0 ? timeoutSec : 30) * 1000;
+
+        const connection = await mysql.createConnection({
+          host: profile.host,
+          port: profile.port,
+          user: profile.user,
+          password: profile.password,
+          database: profile.database,
+          connectTimeout: 5000,
+          multipleStatements: true,
+        });
+
+        let idleTimer: ReturnType<typeof setTimeout> | null = null;
+        let closed = false;
+
+        const resetTimer = () => {
+          if (idleTimer) clearTimeout(idleTimer);
+          idleTimer = setTimeout(async () => {
+            if (closed) return;
+            closed = true;
+            try { await connection.end(); } catch {}
+            process.exit(0);
+          }, timeoutMs);
+        };
+
+        const closeConn = async () => {
+          if (closed) return;
+          closed = true;
+          if (idleTimer) clearTimeout(idleTimer);
+          try { await connection.end(); } catch {}
+        };
+
+        const isTTY = process.stdin.isTTY;
+
+        if (isTTY) {
+          context.log(`Connected to ${profile.user}@${profile.host}:${profile.port}/${profile.database}`);
+          context.log(`Idle timeout: ${timeoutSec}s | Type 'exit' to quit`);
+        }
+
+        resetTimer();
+
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout,
+          prompt: isTTY ? "sql> " : undefined,
+          terminal: isTTY,
+        });
+
+        if (isTTY) rl.prompt();
+
+        let buffer = "";
+
+        rl.on("line", async (line: string) => {
+          const trimmed = line.trim();
+
+          // exit/quit check (always, even mid-buffer)
+          const cmd = trimmed.replace(/;+$/, "").toLowerCase();
+          if (["exit", "quit", "\\q"].includes(cmd)) {
+            buffer = "";
+            rl.close();
+            return;
+          }
+
+          buffer += (buffer ? "\n" : "") + line;
+
+          // Check if statement is complete (ends with ;)
+          const bufTrimmed = buffer.trim();
+          if (!bufTrimmed.endsWith(";")) {
+            // Incomplete statement, show continuation prompt
+            if (isTTY) process.stdout.write("  -> ");
+            return;
+          }
+
+          const statement = bufTrimmed.replace(/;+$/, "").trim();
+          buffer = "";
+
+          if (!statement) {
+            if (isTTY) rl.prompt();
+            return;
+          }
+
+          resetTimer();
+
+          try {
+            const [rows, fields] = await connection.query(statement);
+
+            const anyFields = fields as any;
+            const anyRows = rows as any;
+
+            // multipleStatements: fields is array of FieldPacket[] for each result
+            if (Array.isArray(anyFields) && anyFields.length > 0 && Array.isArray(anyFields[0])) {
+              for (let i = 0; i < anyFields.length; i++) {
+                if (anyFields[i] && anyFields[i].length > 0) {
+                  console.log(formatResults(anyFields[i], anyRows[i] || []));
+                } else if (i < anyRows.length) {
+                  const affectedRows = anyRows[i]?.affectedRows;
+                  if (affectedRows !== undefined) {
+                    console.log(`Query OK, ${affectedRows} row(s) affected`);
+                  } else {
+                    console.log("Query executed successfully");
+                  }
+                }
+                if (i < anyFields.length - 1) console.log("");
+              }
+            } else if (anyFields && anyFields.length > 0) {
+              console.log(formatResults(anyFields, anyRows));
+            } else {
+              const affectedRows = anyRows?.affectedRows;
+              if (affectedRows !== undefined) {
+                console.log(`Query OK, ${affectedRows} row(s) affected`);
+              } else {
+                console.log("Query executed successfully");
+              }
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error(`Error: ${message}`);
+          }
+
+          if (isTTY) rl.prompt();
+        });
+
+        rl.on("close", async () => {
+          await closeConn();
+          process.exit(0);
+        });
+
+        // Keep process alive waiting for input
+        await new Promise<void>((resolve) => {
+          rl.on("close", resolve);
+          process.on("SIGINT", async () => {
+            await closeConn();
+            rl.close();
+            resolve();
+          });
+        });
       },
     },
     {

@@ -9,7 +9,8 @@
     { "path": "../core" },
     { "path": "../plugin-sql" },
     { "path": "../plugin-http" },
-    { "path": "../plugin-ssh" }
+    { "path": "../plugin-ssh" },
+    { "path": "../plugin-weixin" }
   ],
   "include": [
     "src/**/*.ts"

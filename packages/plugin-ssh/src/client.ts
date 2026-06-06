@@ -70,7 +70,7 @@ export function execCommand(profile: SshProfile, command: string): Promise<ExecR
   });
 }
 
-function buildConnectConfig(profile: SshProfile): Record<string, unknown> {
+export function buildConnectConfig(profile: SshProfile): Record<string, unknown> {
   const config: Record<string, unknown> = {
     host: profile.host,
     port: profile.port,

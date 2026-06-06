@@ -1,5 +1,7 @@
+import readline from "node:readline";
+import { Client } from "ssh2";
 import { definePlugin } from "@hua/plugin-sdk";
-import { execCommand, uploadFile, downloadFile } from "./client";
+import { buildConnectConfig, execCommand, uploadFile, downloadFile } from "./client";
 import {
   addOrUpdateProfile,
   getConfigPath,
@@ -84,6 +86,162 @@ export const sshPlugin = definePlugin({
           const message = err instanceof Error ? err.message : String(err);
           throw new Error(`SSH exec failed (target: ${profile.username}@${profile.host}:${profile.port}): ${message}`);
         }
+      },
+    },
+    {
+      name: "shell",
+      description: "Interactive SSH shell with connection reuse (30s idle timeout)",
+      options: [
+        {
+          flags: "-p, --profile <name>",
+          description: "Connection profile name",
+        },
+        {
+          flags: "-t, --timeout <seconds>",
+          description: "Idle timeout in seconds (default: 30)",
+          defaultValue: 30,
+        },
+      ],
+      async action(context) {
+        const explicitProfile = readStringOption(context.options, "profile");
+        const resolved = resolveProfile(explicitProfile);
+
+        if (!resolved) {
+          throw new Error(
+            "No available SSH profile. Use `hua ssh profile add <name> --host ... --username ...` first.",
+          );
+        }
+
+        const { profile } = resolved;
+        const timeoutSec = Number.parseInt(readStringOption(context.options, "timeout") || "30", 10);
+        const timeoutMs = (Number.isFinite(timeoutSec) && timeoutSec > 0 ? timeoutSec : 30) * 1000;
+
+        const conn = new Client();
+        await new Promise<void>((resolve, reject) => {
+          conn.on("ready", () => resolve());
+          conn.on("error", (err) => reject(new Error(`SSH connection failed: ${err.message}`)));
+          conn.connect(buildConnectConfig(profile));
+        });
+
+        let idleTimer: ReturnType<typeof setTimeout> | null = null;
+        let closed = false;
+
+        const resetTimer = () => {
+          if (idleTimer) clearTimeout(idleTimer);
+          idleTimer = setTimeout(() => {
+            if (closed) return;
+            closed = true;
+            conn.end();
+            process.exit(0);
+          }, timeoutMs);
+        };
+
+        const closeConn = () => {
+          if (closed) return;
+          closed = true;
+          if (idleTimer) clearTimeout(idleTimer);
+          conn.end();
+        };
+
+        const isTTY = process.stdin.isTTY;
+
+        if (isTTY) {
+          context.log(`Connected to ${profile.username}@${profile.host}:${profile.port}`);
+          context.log(`Idle timeout: ${timeoutSec}s | Type 'exit' to quit`);
+        }
+
+        resetTimer();
+
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout,
+          prompt: isTTY ? "ssh> " : undefined,
+          terminal: isTTY,
+        });
+
+        if (isTTY) rl.prompt();
+
+        let running = false;
+        let inputClosed = false;
+        const queue: string[] = [];
+
+        const tryExit = () => {
+          if (inputClosed && !running && queue.length === 0) {
+            closeConn();
+            process.exit(0);
+          }
+        };
+
+        const executeCommand = (line: string) => {
+          running = true;
+          resetTimer();
+
+          conn.exec(line, (err, stream) => {
+            if (err) {
+              console.error(`Error: ${err.message}`);
+              running = false;
+              if (isTTY) rl.prompt();
+              if (queue.length > 0) {
+                executeCommand(queue.shift()!);
+              } else {
+                tryExit();
+              }
+              return;
+            }
+
+            stream.stderr.on("data", (data: Buffer) => {
+              process.stderr.write(data);
+            });
+
+            stream.on("data", (data: Buffer) => {
+              process.stdout.write(data);
+            });
+
+            stream.on("close", () => {
+              running = false;
+              if (isTTY) rl.prompt();
+              if (queue.length > 0) {
+                executeCommand(queue.shift()!);
+              } else {
+                tryExit();
+              }
+            });
+          });
+        };
+
+        rl.on("line", (line: string) => {
+          const trimmed = line.trim();
+          if (!trimmed) {
+            if (isTTY) rl.prompt();
+            return;
+          }
+
+          if (["exit", "quit", "\\q"].includes(trimmed.toLowerCase())) {
+            rl.close();
+            return;
+          }
+
+          if (running) {
+            queue.push(trimmed);
+            return;
+          }
+
+          executeCommand(trimmed);
+        });
+
+        rl.on("close", () => {
+          inputClosed = true;
+          tryExit();
+        });
+
+        await new Promise<void>((resolve) => {
+          rl.on("close", resolve);
+          process.on("SIGINT", () => {
+            closeConn();
+            rl.close();
+            resolve();
+          });
+        });
       },
     },
     {
