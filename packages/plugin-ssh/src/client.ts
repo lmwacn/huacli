@@ -45,28 +45,34 @@ export function execCommand(profile: SshProfile, command: string): Promise<ExecR
       reject(new Error(`SSH connection failed: ${err.message}`));
     });
 
-    const connectConfig: Record<string, unknown> = {
-      host: profile.host,
-      port: profile.port,
-      username: profile.username,
-    };
-
-    if (profile.authMethod === "key" && profile.privateKeyPath) {
-      try {
-        connectConfig.privateKey = fs.readFileSync(profile.privateKeyPath);
-        if (profile.passphrase) {
-          connectConfig.passphrase = profile.passphrase;
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        reject(new Error(`Failed to read private key: ${message}`));
-        return;
-      }
-    } else if (profile.password) {
-      connectConfig.password = profile.password;
+    try {
+      conn.connect(buildConnectConfig(profile));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      reject(new Error(`Failed to connect: ${message}`));
     }
+  });
+}
 
-    conn.connect(connectConfig);
+export function testConnection(profile: SshProfile): Promise<{ host: string; port: number }> {
+  return new Promise((resolve, reject) => {
+    const conn = new Client();
+
+    conn.on("ready", () => {
+      conn.end();
+      resolve({ host: profile.host, port: profile.port });
+    });
+
+    conn.on("error", (err) => {
+      reject(new Error(`SSH connection failed: ${err.message}`));
+    });
+
+    try {
+      conn.connect(buildConnectConfig(profile));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      reject(new Error(`Failed to connect: ${message}`));
+    }
   });
 }
 
@@ -112,11 +118,25 @@ function connectSftp(profile: SshProfile): Promise<{ sftp: SFTPWrapper; conn: Cl
   });
 }
 
-export async function uploadFile(profile: SshProfile, localPath: string, remotePath: string): Promise<void> {
+export type ProgressCallback = (bytesTransferred: number, totalBytes: number) => void;
+
+export async function uploadFile(
+  profile: SshProfile,
+  localPath: string,
+  remotePath: string,
+  onProgress?: ProgressCallback,
+): Promise<void> {
   const { sftp, conn } = await connectSftp(profile);
 
   return new Promise<void>((resolve, reject) => {
-    sftp.fastPut(localPath, remotePath, (err) => {
+    const opts: Record<string, unknown> = {};
+    if (onProgress) {
+      opts.step = (bytesTransferred: number, _chunk: number, totalBytes: number) => {
+        onProgress(bytesTransferred, totalBytes);
+      };
+    }
+
+    sftp.fastPut(localPath, remotePath, opts, (err) => {
       if (err) {
         sftp.end();
         conn.end();
@@ -130,14 +150,26 @@ export async function uploadFile(profile: SshProfile, localPath: string, remoteP
   });
 }
 
-export async function downloadFile(profile: SshProfile, remotePath: string, localPath: string): Promise<void> {
+export async function downloadFile(
+  profile: SshProfile,
+  remotePath: string,
+  localPath: string,
+  onProgress?: ProgressCallback,
+): Promise<void> {
   const { sftp, conn } = await connectSftp(profile);
 
   const localDir = path.dirname(localPath);
   fs.mkdirSync(localDir, { recursive: true });
 
   return new Promise<void>((resolve, reject) => {
-    sftp.fastGet(remotePath, localPath, (err) => {
+    const opts: Record<string, unknown> = {};
+    if (onProgress) {
+      opts.step = (bytesTransferred: number, _chunk: number, totalBytes: number) => {
+        onProgress(bytesTransferred, totalBytes);
+      };
+    }
+
+    sftp.fastGet(remotePath, localPath, opts, (err) => {
       if (err) {
         sftp.end();
         conn.end();

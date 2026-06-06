@@ -1,7 +1,7 @@
 import readline from "node:readline";
 import { Client } from "ssh2";
 import { definePlugin } from "@hua/plugin-sdk";
-import { buildConnectConfig, execCommand, uploadFile, downloadFile } from "./client";
+import { buildConnectConfig, execCommand, uploadFile, downloadFile, testConnection } from "./client";
 import {
   addOrUpdateProfile,
   getConfigPath,
@@ -14,6 +14,31 @@ import {
 } from "./profile-store";
 import { SshProfile } from "./types";
 
+/**
+ * Git Bash (MSYS) auto-converts Unix-style paths like /root/file to
+ * C:/Program Files/Git/root/file, and /tmp/file to Windows temp dir.
+ * Detect and undo that conversion.
+ */
+function undoMsysPathConversion(p: string): string {
+  // Pattern 1: /root/... -> C:/Program Files/Git/root/...
+  const gitMarker = "/Git/";
+  const gitIdx = p.indexOf(gitMarker);
+  if (/^[A-Za-z]:/.test(p) && gitIdx !== -1) {
+    return "/" + p.slice(gitIdx + gitMarker.length);
+  }
+
+  // Pattern 2: /tmp/... -> C:/Users/<user>/AppData/Local/Temp/...
+  // Only undo if we're in Git Bash (MSYSTEM is set)
+  if (/^[A-Za-z]:/.test(p) && process.env.MSYSTEM) {
+    const tempIdx = p.indexOf("/AppData/Local/Temp/");
+    if (tempIdx !== -1) {
+      return "/tmp/" + p.slice(tempIdx + "/AppData/Local/Temp/".length);
+    }
+  }
+
+  return p;
+}
+
 function readStringOption(options: Record<string, unknown>, key: string): string {
   const value = options[key];
   if (typeof value === "string") {
@@ -23,6 +48,13 @@ function readStringOption(options: Record<string, unknown>, key: string): string
     return String(value).trim();
   }
   return "";
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 function maskPassword(password?: string): string {
@@ -245,6 +277,36 @@ export const sshPlugin = definePlugin({
       },
     },
     {
+      name: "connect",
+      description: "Test SSH connection to verify connectivity and credentials",
+      options: [
+        {
+          flags: "-p, --profile <name>",
+          description: "Connection profile name",
+        },
+      ],
+      async action(context) {
+        const explicitProfile = readStringOption(context.options, "profile");
+        const resolved = resolveProfile(explicitProfile);
+
+        if (!resolved) {
+          throw new Error(
+            "No available SSH profile. Use `hua ssh profile add <name> --host ... --username ...` first.",
+          );
+        }
+
+        const { profile } = resolved;
+
+        try {
+          const result = await testConnection(profile);
+          context.log(`Connection successful: ${profile.username}@${result.host}:${result.port}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          throw new Error(`Connection failed (${profile.username}@${profile.host}:${profile.port}): ${message}`);
+        }
+      },
+    },
+    {
       name: "upload",
       description: "Upload a local file to remote server via SFTP",
       arguments: ["<localPath>", "<remotePath>"],
@@ -256,12 +318,7 @@ export const sshPlugin = definePlugin({
       ],
       async action(context) {
         const localPath = (context.args[0] ?? "").trim();
-        let remotePath = (context.args[1] ?? "").trim();
-
-        // Git Bash auto-converts /root/... to Windows path, undo it
-        if (remotePath.startsWith("C:/Program Files/Git")) {
-          remotePath = remotePath.slice("C:/Program Files/Git".length);
-        }
+        const remotePath = undoMsysPathConversion((context.args[1] ?? "").trim());
 
         if (!localPath || !remotePath) {
           throw new Error("Usage: hua ssh upload <localPath> <remotePath>");
@@ -279,7 +336,17 @@ export const sshPlugin = definePlugin({
         const { profile } = resolved;
 
         try {
-          await uploadFile(profile, localPath, remotePath);
+          let lastPercent = -1;
+          await uploadFile(profile, localPath, remotePath, (transferred, total) => {
+            if (total > 0) {
+              const percent = Math.floor((transferred / total) * 100);
+              if (percent !== lastPercent) {
+                lastPercent = percent;
+                process.stderr.write(`\rUploading: ${formatBytes(transferred)} / ${formatBytes(total)} (${percent}%)`);
+              }
+            }
+          });
+          if (lastPercent >= 0) process.stderr.write("\n");
           context.log(`Uploaded: ${localPath} -> ${profile.host}:${remotePath}`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -298,13 +365,8 @@ export const sshPlugin = definePlugin({
         },
       ],
       async action(context) {
-        let remotePath = (context.args[0] ?? "").trim();
+        const remotePath = undoMsysPathConversion((context.args[0] ?? "").trim());
         const localPath = (context.args[1] ?? "").trim();
-
-        // Git Bash auto-converts /root/... to Windows path, undo it
-        if (remotePath.startsWith("C:/Program Files/Git")) {
-          remotePath = remotePath.slice("C:/Program Files/Git".length);
-        }
 
         if (!remotePath || !localPath) {
           throw new Error("Usage: hua ssh download <remotePath> <localPath>");
@@ -322,7 +384,17 @@ export const sshPlugin = definePlugin({
         const { profile } = resolved;
 
         try {
-          await downloadFile(profile, remotePath, localPath);
+          let lastPercent = -1;
+          await downloadFile(profile, remotePath, localPath, (transferred, total) => {
+            if (total > 0) {
+              const percent = Math.floor((transferred / total) * 100);
+              if (percent !== lastPercent) {
+                lastPercent = percent;
+                process.stderr.write(`\rDownloading: ${formatBytes(transferred)} / ${formatBytes(total)} (${percent}%)`);
+              }
+            }
+          });
+          if (lastPercent >= 0) process.stderr.write("\n");
           context.log(`Downloaded: ${profile.host}:${remotePath} -> ${localPath}`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);

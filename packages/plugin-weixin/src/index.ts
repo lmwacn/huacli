@@ -95,8 +95,9 @@ const sendCommand: HuaCommand = {
 
     const { api, state } = ensureAuth();
 
-    // We need context_token to send messages.
-    // If we don't have one cached, we can still try (some APIs allow it).
+    // Refresh context_token via a quick getupdates poll
+    await refreshContextTokens(api, state);
+
     const contextToken = state.context_tokens[to] || "";
 
     try {
@@ -212,6 +213,41 @@ const logoutCommand: HuaCommand = {
 
 // --- Helpers ---
 
+/** Do a quick getupdates poll to refresh context_tokens from recent messages. */
+async function refreshContextTokens(api: WeixinApiClient, state: WeixinAccountState): Promise<void> {
+  try {
+    const body: Record<string, any> = {
+      get_updates_buf: state.get_updates_buf || "",
+      base_info: BASE_INFO,
+    };
+    const data = await api.apiPost("ilink/bot/getupdates", body);
+    const ret = data.ret ?? 0;
+    const errcode = data.errcode ?? 0;
+    if (ret !== 0 || errcode !== 0) return;
+
+    // Update cursor
+    if (data.get_updates_buf) {
+      state.get_updates_buf = data.get_updates_buf;
+    }
+
+    // Cache context_tokens from any messages in the response
+    const msgs: WeixinMessage[] = data.msgs || [];
+    let updated = false;
+    for (const msg of msgs) {
+      if (msg.message_type === MESSAGE_TYPE_BOT) continue;
+      if (msg.from_user_id && msg.context_token) {
+        state.context_tokens[msg.from_user_id] = msg.context_token;
+        updated = true;
+      }
+    }
+    if (updated || data.get_updates_buf) {
+      saveState(state);
+    }
+  } catch {
+    // Silently ignore - we'll try sending anyway
+  }
+}
+
 async function sendText(
   api: WeixinApiClient,
   toUserId: string,
@@ -230,9 +266,10 @@ async function sendText(
   if (contextToken) msg.context_token = contextToken;
 
   const data = await api.apiPost("ilink/bot/sendmessage", { msg });
-  const errcode = data.errcode || 0;
-  if (errcode !== 0) {
-    throw new Error(`Send error (code ${errcode}): ${data.errmsg || ""}`);
+  const ret = data.ret ?? 0;
+  const errcode = data.errcode ?? 0;
+  if (ret !== 0 || errcode !== 0) {
+    throw new Error(`Send error (ret=${ret} errcode=${errcode}): ${data.errmsg || ""}`);
   }
 }
 

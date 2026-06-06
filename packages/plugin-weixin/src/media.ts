@@ -178,8 +178,9 @@ export async function uploadAndSendMedia(
   if (contextToken) msg.context_token = contextToken;
 
   const sendResp = await api.apiPost("ilink/bot/sendmessage", { msg });
-  const errcode = sendResp.errcode || 0;
-  if (errcode !== 0) {
-    throw new Error(`WeChat send media error (code ${errcode}): ${sendResp.errmsg || ""}`);
+  const ret = sendResp.ret ?? 0;
+  const errcode = sendResp.errcode ?? 0;
+  if (ret !== 0 || errcode !== 0) {
+    throw new Error(`WeChat send media error (ret=${ret} errcode=${errcode}): ${sendResp.errmsg || ""}`);
   }
 }
